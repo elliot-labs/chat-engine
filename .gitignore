@@ -1,3 +1,9 @@
+# Microsoft Storage Emulator
+Azurite/
+
+# Compiled files
+bin
+
 # Logs
 logs
 *.log

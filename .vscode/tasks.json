@@ -1,0 +1,51 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Launch - Local",
+            "detail": "Starts all the local components that are required for running the system fully offline.",
+            "icon": {
+                "id": "rocket",
+                "color": "terminal.ansiGreen"
+            },
+            "dependsOn": [
+                "Build Server - Development"
+            ]
+        },
+        {
+            "label": "Start Azurite - Blob",
+            "detail": "Starts the blob storage emulator in the Azurite Extension installed in VS Code.",
+            "command": "${command:azurite.start_blob}",
+            "icon": {
+                "id": "cloud",
+                "color": "terminal.ansiBlue"
+            }
+        },
+        {
+            "label": "Build Server - Development",
+            "detail": "Builds the backend TypeScript into executable code for development.",
+            "icon": {
+                "id": "debug",
+                "color": "terminal.ansiYellow"
+            },
+            "type": "npm",
+            "script": "build:Dev",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Server - Production",
+            "detail": "Builds the backend TypeScript into executable code for production.",
+            "icon": {
+                "id": "debug",
+                "color": "terminal.ansiYellow"
+            },
+            "type": "npm",
+            "script": "build:Prod",
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}
