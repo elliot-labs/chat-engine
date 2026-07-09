@@ -102,17 +102,64 @@ export class ChatEngine {
     /**
      * Processes a chat message by sending it to the conversation client.
      * @param userMessage The message from the user to be processed.
+     * @param permissionList List of permissions associated with the user message. Used for tool calls/plugin access control.
+     * @param userId Unique Identifier for the user sending the message. Used for safety and moderation purposes on cloud hosted models. This should not include PII, please try to use a GUID or hashed value of some immutable identifier.
+     * @param messageHistory Optional history of previous messages in the conversation. If not provided, only the current user message will be processed.
+     * @throws {TypeError} If the user message, permission list, or message history is not valid.
+     * @returns A promise that resolves to an array of ResponseInputItem objects representing the conversation history and any output from the model.
      */
-    public async processChatMessage(userMessage: string): Promise<void> {
+    public async processChatMessage(userMessage: string, permissionList: string[], userId: string, messageHistory?: ResponseInputItem[]): Promise<ResponseInputItem[]> {
         // #region Input Validation
         assertGuardEquals(userMessage);
+
+        assertGuardEquals(permissionList);
+
+        assertGuardEquals(userId);
+
+        assertGuardEquals(messageHistory);
         // #endregion Input Validation
 
+        /** Conversation history for the current chat message. */
+        let conversationHistory: ResponseInputItem[] = [
+            {
+                'content': userMessage,
+                'role': 'user'
+            }
+        ];
+
+        // If message history is provided and is not empty, prepend it to the conversation history.
+        if (messageHistory && messageHistory.length !== 0) { conversationHistory.unshift(...messageHistory); }
+
+        // Check if a system prompt is configured and inject it into the conversation history if so.
+        if (this.#conversationConfig.systemPrompt) {
+            // Inject the system prompt at the beginning
+            conversationHistory.unshift({
+                'content': this.#conversationConfig.systemPrompt,
+                'role': 'developer'
+            });
+        }
+
         /** Results of processing the chat message. */
-        await this.#conversationClient.responses.create({
-            'input': userMessage,
-            'model': this.#conversationConfig.model
+        const processingResult = await this.#conversationClient.responses.create({
+            'input': conversationHistory,
+            'model': this.#conversationConfig.model,
+            'safety_identifier': userId
         });
+
+        // Add the output text from the processing result to the conversation history
+        conversationHistory.push(...toResponseInputItems(processingResult.output));
+
+        // Remove any system prompts from the history to ensure that they do not leak to the end user
+        conversationHistory = conversationHistory.filter((message) => {
+            // Check if the role is present, if so, filter out any messages with the role of 'developer' (system prompt).
+            if ('role' in message && message.role === 'developer') { return false; }
+
+            // The message is allowed to remain in the conversation history if it is not a system prompt.
+            return true;
+        });
+
+        // Return the results of processing the chat message, including the conversation history and any output from the model.
+        return conversationHistory;
     }
 
     /**
