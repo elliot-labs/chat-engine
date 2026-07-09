@@ -10,7 +10,7 @@ import { toResponseInputItems } from 'openai/lib/responses/ResponseInputItems';
 /** LLM interaction engine. Supports chat, embeddings, and plugin management. */
 export class ChatEngine {
     /** List of plugins that are registered with the chat engine. */
-    #plugins: ChatEnginePlugin[];
+    #plugins: Record<string & tags.Format<'uuid'>, ChatEnginePlugin>;
     /** Instance of the configured OpenAI client used for processing chat messages and LLM operations. */
     #conversationClient: OpenAI;
     /** Instance of the configured OpenAI client used for generating embeddings. */
@@ -78,7 +78,7 @@ export class ChatEngine {
         }
 
         // Initialize the plugins list
-        this.#plugins = [];
+        this.#plugins = {};
     }
 
     // #endregion Initialization
@@ -91,12 +91,12 @@ export class ChatEngine {
     public registerPlugin(plugin: ChatEnginePlugin): void {
         // #region Input Validation
         if (!(plugin instanceof ChatEnginePlugin)) { throw new TypeError('The provided plugin is not a Chat Engine Plugin!', { 'cause': 'Input Validation!' }); }
+
+        if (plugin.id in this.#plugins) { throw new TypeError('A plugin with the same ID is already registered!', { 'cause': 'Input Validation!' }); }
         // #endregion Input Validation
 
-        if (this.#plugins.some((currentPlugin) => currentPlugin.id === plugin.id)) { throw new TypeError('A plugin with the same ID is already registered!', { 'cause': 'Input Validation!' }); }
-
         // Add the plugin to the list of registered plugins
-        this.#plugins.push(plugin);
+        this.#plugins[plugin.id] = plugin;
     }
 
     /**
