@@ -28,6 +28,8 @@ export interface ConversationConfig {
      * `http://localhost:1234/v1/`
      */
     'host'?: string;
+    /** If provided, tool call recursion will be limited to this depth. */
+    'maxRecursionDepth'?: number;
     /**
      * Name of the model to be used by the chat engine.
      * If using a custom host like LM Studio, this is the Model ID.

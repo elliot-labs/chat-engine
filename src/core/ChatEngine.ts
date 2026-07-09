@@ -1,8 +1,9 @@
 import type { ConversationConfig, EmbeddingResult, EmbeddingsConfig } from '../types/ChatEngine.js';
+import type { ResponseInputItem, ResponseOutputItem, Tool } from 'openai/resources/responses/responses';
 import { assertGuardEquals, type tags } from 'typia';
 import { ChatEnginePlugin } from './Plugin.js';
 import { OpenAI } from 'openai';
-import type { ResponseInputItem } from 'openai/resources/responses/responses.js';
+import { createHash } from 'node:crypto';
 import { getBearerTokenProvider } from '@azure/identity';
 import { isTokenCredential } from '@azure/core-auth';
 import { toResponseInputItems } from 'openai/lib/responses/ResponseInputItems';
@@ -10,7 +11,7 @@ import { toResponseInputItems } from 'openai/lib/responses/ResponseInputItems';
 /** LLM interaction engine. Supports chat, embeddings, and plugin management. */
 export class ChatEngine {
     /** List of plugins that are registered with the chat engine. */
-    #plugins: Record<string & tags.Format<'uuid'>, ChatEnginePlugin>;
+    #plugins: Record<string & tags.Format<'uuid'>, ChatEnginePlugin<unknown>>;
     /** Instance of the configured OpenAI client used for processing chat messages and LLM operations. */
     #conversationClient: OpenAI;
     /** Instance of the configured OpenAI client used for generating embeddings. */
@@ -88,7 +89,7 @@ export class ChatEngine {
      * @param plugin Plugin that is to be registered with the Chat Engine.
      * @throws {TypeError} If the provided plugin is not an instance of ChatEnginePlugin or if a plugin with the same ID is already registered.
      */
-    public registerPlugin(plugin: ChatEnginePlugin): void {
+    public registerPlugin(plugin: ChatEnginePlugin<unknown>): void {
         // #region Input Validation
         if (!(plugin instanceof ChatEnginePlugin)) { throw new TypeError('The provided plugin is not a Chat Engine Plugin!', { 'cause': 'Input Validation!' }); }
 
@@ -101,9 +102,13 @@ export class ChatEngine {
 
     /**
      * Processes a chat message by sending it to the conversation client.
+     *
+     * The `userId` parameter is hashed using SHA256 to create a unique identifier for the user that doesn't include PII directly without hash cracking.
+     * This hashed identifier is then sent to the LLM host for safety and moderation purposes, ensuring that the harness provider can attribute any issues to the end user rather than the provider itself.
+     * A non-hashed version of this is passed to all tool calls as a standardized parameter.
      * @param userMessage The message from the user to be processed.
      * @param permissionList List of permissions associated with the user message. Used for tool calls/plugin access control.
-     * @param userId Unique Identifier for the user sending the message. Used for safety and moderation purposes on cloud hosted models. This should not include PII, please try to use a GUID or hashed value of some immutable identifier.
+     * @param userId Unique Identifier for the user sending the message. Used for safety and moderation purposes on cloud hosted models.
      * @param messageHistory Optional history of previous messages in the conversation. If not provided, only the current user message will be processed.
      * @throws {TypeError} If the user message, permission list, or message history is not valid.
      * @returns A promise that resolves to an array of ResponseInputItem objects representing the conversation history and any output from the model.
@@ -139,15 +144,30 @@ export class ChatEngine {
             });
         }
 
+        /** List of tools that the currently authenticated user is allowed to use. */
+        const toolList = this.#calculatePluginList(permissionList);
+
+        /** Hashed User ID to be provided to the LLM host for ensuring that the harness provider doesn't get banned and they can place the blame on their end user instead. */
+        const safetyId = createHash('sha256')
+            .update(userId)
+            .digest('hex');
+
         /** Results of processing the chat message. */
         const processingResult = await this.#conversationClient.responses.create({
             'input': conversationHistory,
             'model': this.#conversationConfig.model,
-            'safety_identifier': userId
+            'safety_identifier': safetyId,
+            'tools': toolList
         });
 
         // Add the output text from the processing result to the conversation history
         conversationHistory.push(...toResponseInputItems(processingResult.output));
+
+        // Check if function calls are requested, if so, run the plugin processor
+        if (processingResult.output.some((message) => message.type === 'function_call')) {
+            // Run the plugin processor to handle any function calls requested by the model, passing in the conversation history, the output from the model, the user ID, and the safety ID.
+            await this.#runPlugin(conversationHistory, processingResult.output, userId, safetyId, toolList);
+        }
 
         // Remove any system prompts from the history to ensure that they do not leak to the end user
         conversationHistory = conversationHistory.filter((message) => {
@@ -197,4 +217,151 @@ export class ChatEngine {
         // Return the embedding generated by the model along with the associated content.
         return embedding;
     }
+
+    // #region Helper Functions
+
+    /**
+     * Processes the tool calls requested by the model by executing the registered plugins and updating the conversation history accordingly.
+     *
+     * This method is called recursively to handle any additional tool calls requested by the model after executing the initial set of tool calls.
+     * The recursion depth is tracked to ensure that it does not exceed the maximum recursion depth configured for the conversation.
+     * @param conversationHistory Reference to the conversation history that is being built up as the model processes the chat message and any tool calls. This will be mutated in place by reference.
+     * @param toolRequest Current set of tool calls requested by the model to be processed.
+     * @param userId Unique Identifier for the user sending the message.
+     * @param safetyId Safety identifier for the current conversation context.
+     * @param toolList List of tools that the currently authenticated user is allowed to use.
+     * @param recursionCount Current recursion depth for the plugin execution.
+     */
+    async #runPlugin(conversationHistory: ResponseInputItem[], toolRequest: ResponseOutputItem[], userId: string, safetyId: string, toolList: Tool[], recursionCount?: number & tags.Minimum<0>): Promise<void> {
+        // #region Input Validation
+        assertGuardEquals(conversationHistory);
+
+        assertGuardEquals(toolRequest);
+
+        assertGuardEquals(userId);
+
+        assertGuardEquals(safetyId);
+
+        assertGuardEquals(toolList);
+
+        assertGuardEquals(recursionCount);
+        // #endregion Input Validation
+
+        /** Current iteration depth for the chat message processing. */
+        const computedRecursionCount = recursionCount ?? 0;
+
+        // Iterate over each result and run any tool calls that are requested
+        for (const message of toolRequest) {
+            // Check if a tool call is requested and if so, run the plugin associated with the tool call
+            if (message.type === 'function_call') {
+                // Check if the plugin is registered with the chat engine and if so, run the plugin's callback function with the provided arguments.
+                if (message.name in this.#plugins) {
+                    /** String results of the plugin execution. If rich content is needed, serialized JSON will be returned. */
+                    const executionResults = await this.#plugins[message.name]!.callback({ userId }, message.arguments);
+
+                    /** Plugin execution results in the conversation history format. */
+                    const toolCallResponse: ResponseInputItem.FunctionCallOutput = {
+                        'call_id': message.call_id,
+                        'output': executionResults,
+                        'type': 'function_call_output'
+                    };
+
+                    // Add the output from the plugin execution to the conversation history
+                    conversationHistory.push(toolCallResponse);
+                } else { // If not, return an error message indicating that the plugin is not registered.
+                    /** Plugin execution results in the conversation history format. */
+                    const toolCallResponse: ResponseInputItem.FunctionCallOutput = {
+                        'call_id': message.call_id,
+                        'output': 'The requested plugin is not registered with the chat engine. Please ensure that the plugin is registered before attempting to use it.',
+                        'type': 'function_call_output'
+                    };
+
+                    // Add the output from the plugin execution to the conversation history
+                    conversationHistory.push(toolCallResponse);
+                }
+            }
+        }
+
+        /** Results of processing the chat message. */
+        const processingResult = await this.#conversationClient.responses.create({
+            'input': conversationHistory,
+            'instructions': 'Respond only with data generated by a tool call. More tool calls are allowed if further tool calls are requested. If no further tool calls are requested, respond with the final output to the user.',
+            'model': this.#conversationConfig.model,
+            'safety_identifier': safetyId,
+            'tools': toolList
+        });
+
+        // Add the output text from the processing result to the conversation history
+        conversationHistory.push(...toResponseInputItems(processingResult.output));
+
+        // Check if more tool calls are requested, if so, run the plugin processor again
+        if (processingResult.output.some((message) => message.type === 'function_call')) {
+            // Check if more tool calls are requested
+            if (
+                this.#conversationConfig.maxRecursionDepth &&
+                computedRecursionCount > this.#conversationConfig.maxRecursionDepth
+            ) {
+                // Don't recurse any further if the recursion count exceeds the maximum recursion depth configured for the conversation.
+
+                /** Results of processing the chat message. */
+                const finalProcessingResult = await this.#conversationClient.responses.create({
+                    'input': conversationHistory,
+                    'instructions': 'The maximum recursion depth has been reached for tool calling. No further tool calls will be made.',
+                    'model': this.#conversationConfig.model,
+                    'safety_identifier': safetyId
+                });
+
+                // Add the output text from the processing result to the conversation history
+                conversationHistory.push(...toResponseInputItems(finalProcessingResult.output));
+            } else {
+                // Process the next layer of tool calls if more are requested and the maximum recursion depth has not been reached.
+                await this.#runPlugin(conversationHistory, processingResult.output, userId, safetyId, toolList, computedRecursionCount + 1);
+            }
+        }
+    }
+
+    /**
+     * Checks the user's current set of permissions (scopes) to see which plugins are allowed to be run for the current user.
+     *
+     * How the RBAC filter works:
+     * - If the plugin has an empty list: that means no permissions are required. It will be included in the list of available tools.
+     * - If the plugin has a list of required permissions, and the user has some of those permissions, then the plugin will not be in the list of allowed plugins.
+     * - If the plugin has a list of required permissions, and the user has all of the permissions, then the plugin will be in the list of allowed plugins.
+     * @param userPermissionList List of permissions that the current user has. This will be used to filter the list of plugins that are allowed to be run for the current user.
+     * @returns List of plugins that are allowed to be run for the user's current permission list.
+     */
+    #calculatePluginList(userPermissionList: string[]): Tool[] {
+        // #region Input Validation
+        assertGuardEquals(userPermissionList);
+        // #endregion Input Validation
+
+        /** List of plugins that are allowed for the current permission list. */
+        const pluginList: Tool[] = [];
+
+        // Iterate through each plugin and check if the permissions are met for the current user.
+        for (const pluginId in this.#plugins) {
+            // Skip the current item if it is not a direct property of the plugins object (i.e., if it is inherited from the prototype chain).
+            // eslint-disable-next-line no-continue
+            if (!Object.hasOwn(this.#plugins, pluginId)) { continue; }
+
+            /** Plugin to evaluate permissions on. */
+            const currentPlugin = this.#plugins[pluginId];
+
+            // Ensure that the plugin is actually present before operating on it.
+            if (currentPlugin) {
+                // If no permissions are defined, add the plugin to the list of allowed plugins.
+                if (currentPlugin.requiredPermissionList.length === 0) {
+                    // Add the current plugin to the list of allowed plugins since no permissions are required.
+                    pluginList.push(currentPlugin.configuration);
+                } else if (currentPlugin.requiredPermissionList.every((permission) => userPermissionList.includes(permission))) {
+                    // If the user has all of the required permissions for the current plugin, add it to the list of allowed plugins.
+                    pluginList.push(currentPlugin.configuration);
+                }
+            }
+        }
+
+        // Return the computed plugin list to the caller
+        return pluginList;
+    }
+    // #endregion Helper Functions
 }
