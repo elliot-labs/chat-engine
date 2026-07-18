@@ -30,9 +30,6 @@
     },
     "author": "Elliot Huffman (elliot@huffman.me)",
     "type": "module",
-    "files": [
-        "bin/"
-    ],
     "main": "bin/src/index.js",
     "scripts": {
         "build:Dev": "tsc",
