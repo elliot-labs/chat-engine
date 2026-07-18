@@ -33,7 +33,7 @@
     "files": [
         "bin/"
     ],
-    "main": "bin/index.js",
+    "main": "bin/src/index.js",
     "scripts": {
         "build:Dev": "tsc",
         "prebuild:Prod": "tsc -p prod.tsconfig.json --emitDeclarationOnly false",
