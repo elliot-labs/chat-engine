@@ -1,4 +1,8 @@
+import type { CommonCallbackProps } from './Plugin.js';
 import type { TokenCredential } from '@azure/core-auth';
+
+/** Metadata that is used to provide execution context to the LLM Message processing method. */
+export type CommonMetadata = Omit<CommonCallbackProps, 'chatEngine' | 'vectorDb'>;
 
 /** Configuration options for initializing the conversation instance. */
 export interface ConversationConfig {

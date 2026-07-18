@@ -1,7 +1,8 @@
-import type { ConversationConfig, EmbeddingResult, EmbeddingsConfig } from '../types/ChatEngine.js';
+import type { CommonMetadata, ConversationConfig, EmbeddingResult, EmbeddingsConfig } from '../types/ChatEngine.js';
 import type { ResponseInputItem, ResponseOutputItem, Tool } from 'openai/resources/responses/responses';
 import { assertGuardEquals, type tags } from 'typia';
 import { ChatEnginePlugin } from './Plugin.js';
+import type { CommonCallbackProps } from '../types/Plugin.js';
 import { OpenAI } from 'openai';
 import { createHash } from 'node:crypto';
 import { getBearerTokenProvider } from '@azure/identity';
@@ -20,6 +21,8 @@ export class ChatEngine {
     #conversationConfig: Omit<ConversationConfig, 'authentication'>;
     /** Configuration options for the embeddings instance. */
     #embeddingsConfig: Omit<EmbeddingsConfig, 'authentication'> | undefined;
+    /** In-memory vector database for storing embeddings and making them available to all plugins. */
+    #vectorDb: EmbeddingResult[];
 
     // #region Initialization
 
@@ -51,6 +54,9 @@ export class ChatEngine {
             'apiKey': chatAuth,
             'baseURL': this.#conversationConfig.host
         });
+
+        // Initialize the in-memory vector database for storing embeddings. If not provided, initialize as a blank DB.
+        this.#vectorDb = [];
 
         // Only initialize the embeddings client if the configuration options are provided.
         if (embeddingConfig) {
@@ -84,6 +90,8 @@ export class ChatEngine {
 
     // #endregion Initialization
 
+    // #region Business Logic
+
     /**
      * Registers the provided plugin within the Chat Engine.
      * @param plugin Plugin that is to be registered with the Chat Engine.
@@ -107,19 +115,16 @@ export class ChatEngine {
      * This hashed identifier is then sent to the LLM host for safety and moderation purposes, ensuring that the harness provider can attribute any issues to the end user rather than the provider itself.
      * A non-hashed version of this is passed to all tool calls as a standardized parameter.
      * @param userMessage The message from the user to be processed.
-     * @param permissionList List of permissions associated with the user message. Used for tool calls/plugin access control.
-     * @param userId Unique Identifier for the user sending the message. Used for safety and moderation purposes on cloud hosted models.
+     * @param commonMetadata Common metadata that is shared across all plugins, including the user ID, tenant ID, and permission list.
      * @param messageHistory Optional history of previous messages in the conversation. If not provided, only the current user message will be processed.
      * @throws {TypeError} If the user message, permission list, or message history is not valid.
      * @returns A promise that resolves to an array of ResponseInputItem objects representing the conversation history and any output from the model.
      */
-    public async processChatMessage(userMessage: string, permissionList: string[], userId: string, messageHistory?: ResponseInputItem[]): Promise<ResponseInputItem[]> {
+    public async invokeLanguageModel(userMessage: string, commonMetadata: CommonMetadata, messageHistory?: ResponseInputItem[]): Promise<ResponseInputItem[]> {
         // #region Input Validation
         assertGuardEquals(userMessage);
 
-        assertGuardEquals(permissionList);
-
-        assertGuardEquals(userId);
+        assertGuardEquals(commonMetadata);
 
         assertGuardEquals(messageHistory);
         // #endregion Input Validation
@@ -145,11 +150,11 @@ export class ChatEngine {
         }
 
         /** List of tools that the currently authenticated user is allowed to use. */
-        const toolList = this.#calculatePluginList(permissionList);
+        const toolList = this.#selectPlugin(commonMetadata.permissionList);
 
         /** Hashed User ID to be provided to the LLM host for ensuring that the harness provider doesn't get banned and they can place the blame on their end user instead. */
         const safetyId = createHash('sha256')
-            .update(userId)
+            .update(commonMetadata.userId)
             .digest('hex');
 
         /** Results of processing the chat message. */
@@ -166,7 +171,7 @@ export class ChatEngine {
         // Check if function calls are requested, if so, run the plugin processor
         if (processingResult.output.some((message) => message.type === 'function_call')) {
             // Run the plugin processor to handle any function calls requested by the model, passing in the conversation history, the output from the model, the user ID, and the safety ID.
-            await this.#runPlugin(conversationHistory, processingResult.output, userId, safetyId, toolList);
+            await this.#invokePlugin(conversationHistory, processingResult.output, commonMetadata, safetyId, toolList);
         }
 
         // Remove any system prompts from the history to ensure that they do not leak to the end user
@@ -190,7 +195,7 @@ export class ChatEngine {
      * @param content The content for which embeddings are to be generated.
      * @returns A promise that resolves to an array of embeddings.
      */
-    public async generateEmbedding(content: string): Promise<EmbeddingResult> {
+    public async newContentVectorList(content: string): Promise<EmbeddingResult> {
         // #region Input Validation
         assertGuardEquals(content);
 
@@ -218,7 +223,81 @@ export class ChatEngine {
         return embedding;
     }
 
+    /**
+     * Overwrites the in-memory vector database with the provided new vector database.
+     * Serializes and de-serializes the provided vector database to ensure that it is a deep copy and that no references to the original object are retained.
+     * @throws {TypeError} If the provided vector database is not valid.
+     * @param vectorDb The new vector database to be set as the in-memory vector database.
+     */
+    public setVectorDb(vectorDb: EmbeddingResult[] & tags.MinItems<1>): void {
+        // #region Input Validation
+        assertGuardEquals(vectorDb);
+
+        /**
+         * Count of dimension in the Vector DB, used to ensure that all entries have the same count.
+         * If the count differs, cosine similarity can't operate.
+         */
+        const dimensionCount = vectorDb[0]!.embedding.length;
+
+        // Iterate through each vector in the provided vector database and ensure that the dimension count matches the first vector.
+        for (const vector of vectorDb) {
+            // Iterate through each vector and ensure that the dimension count matches the first vector.
+            if (vector.embedding.length !== dimensionCount) { throw new RangeError('Inconsistent embedding dimensions in the provided vector database!', { 'cause': 'Input Validation!' }); }
+        }
+
+        // #endregion Input Validation
+
+        // Set the provided vector DB to be the in-memory vector database for storing embeddings and making them available to all plugins.
+        this.#vectorDb = JSON.parse(JSON.stringify(vectorDb)) as EmbeddingResult[];
+    }
+
+    // #endregion Business Logic
+
     // #region Helper Functions
+
+    /**
+     * Checks the user's current set of permissions (scopes) to see which plugins are allowed to be run for the current user.
+     *
+     * How the RBAC filter works:
+     * - If the plugin has an empty list: that means no permissions are required. It will be included in the list of available tools.
+     * - If the plugin has a list of required permissions, and the user has some of those permissions, then the plugin will not be in the list of allowed plugins.
+     * - If the plugin has a list of required permissions, and the user has all of the permissions, then the plugin will be in the list of allowed plugins.
+     * @param userPermissionList List of permissions that the current user has. This will be used to filter the list of plugins that are allowed to be run for the current user.
+     * @returns List of plugins that are allowed to be run for the user's current permission list.
+     */
+    #selectPlugin(userPermissionList: string[]): Tool[] {
+        // #region Input Validation
+        assertGuardEquals(userPermissionList);
+        // #endregion Input Validation
+
+        /** List of plugins that are allowed for the current permission list. */
+        const pluginList: Tool[] = [];
+
+        // Iterate through each plugin and check if the permissions are met for the current user.
+        for (const pluginId in this.#plugins) {
+            // Skip the current item if it is not a direct property of the plugins object (i.e., if it is inherited from the prototype chain).
+            // eslint-disable-next-line no-continue
+            if (!Object.hasOwn(this.#plugins, pluginId)) { continue; }
+
+            /** Plugin to evaluate permissions on. */
+            const currentPlugin = this.#plugins[pluginId];
+
+            // Ensure that the plugin is actually present before operating on it.
+            if (currentPlugin) {
+                // If no permissions are defined, add the plugin to the list of allowed plugins.
+                if (currentPlugin.requiredPermissionList.length === 0) {
+                    // Add the current plugin to the list of allowed plugins since no permissions are required.
+                    pluginList.push(currentPlugin.configuration);
+                } else if (currentPlugin.requiredPermissionList.every((permission) => userPermissionList.includes(permission))) {
+                    // If the user has all of the required permissions for the current plugin, add it to the list of allowed plugins.
+                    pluginList.push(currentPlugin.configuration);
+                }
+            }
+        }
+
+        // Return the computed plugin list to the caller
+        return pluginList;
+    }
 
     /**
      * Processes the tool calls requested by the model by executing the registered plugins and updating the conversation history accordingly.
@@ -227,18 +306,18 @@ export class ChatEngine {
      * The recursion depth is tracked to ensure that it does not exceed the maximum recursion depth configured for the conversation.
      * @param conversationHistory Reference to the conversation history that is being built up as the model processes the chat message and any tool calls. This will be mutated in place by reference.
      * @param toolRequest Current set of tool calls requested by the model to be processed.
-     * @param userId Unique Identifier for the user sending the message.
+     * @param commonMetadata Common metadata that is shared across all plugins, including the user ID, tenant ID, and permission list.
      * @param safetyId Safety identifier for the current conversation context.
      * @param toolList List of tools that the currently authenticated user is allowed to use.
      * @param recursionCount Current recursion depth for the plugin execution.
      */
-    async #runPlugin(conversationHistory: ResponseInputItem[], toolRequest: ResponseOutputItem[], userId: string, safetyId: string, toolList: Tool[], recursionCount?: number & tags.Minimum<0>): Promise<void> {
+    async #invokePlugin(conversationHistory: ResponseInputItem[], toolRequest: ResponseOutputItem[], commonMetadata: CommonMetadata, safetyId: string, toolList: Tool[], recursionCount?: number & tags.Minimum<0>): Promise<void> {
         // #region Input Validation
         assertGuardEquals(conversationHistory);
 
         assertGuardEquals(toolRequest);
 
-        assertGuardEquals(userId);
+        assertGuardEquals(commonMetadata);
 
         assertGuardEquals(safetyId);
 
@@ -250,6 +329,13 @@ export class ChatEngine {
         /** Current iteration depth for the chat message processing. */
         const computedRecursionCount = recursionCount ?? 0;
 
+        /** Set of metadata properties to be passed to all plugin callbacks to ensure they have the full execution context. */
+        const computedCallbackCommonProps: CommonCallbackProps = {
+            ...commonMetadata,
+            'chatEngine': this,
+            'vectorDb': this.#vectorDb
+        };
+
         // Iterate over each result and run any tool calls that are requested
         for (const message of toolRequest) {
             // Check if a tool call is requested and if so, run the plugin associated with the tool call
@@ -257,7 +343,7 @@ export class ChatEngine {
                 // Check if the plugin is registered with the chat engine and if so, run the plugin's callback function with the provided arguments.
                 if (message.name in this.#plugins) {
                     /** String results of the plugin execution. If rich content is needed, serialized JSON will be returned. */
-                    const executionResults = await this.#plugins[message.name]!.callback({ userId }, message.arguments);
+                    const executionResults = await this.#plugins[message.name]!.callback(computedCallbackCommonProps, message.arguments);
 
                     /** Plugin execution results in the conversation history format. */
                     const toolCallResponse: ResponseInputItem.FunctionCallOutput = {
@@ -315,53 +401,9 @@ export class ChatEngine {
                 conversationHistory.push(...toResponseInputItems(finalProcessingResult.output));
             } else {
                 // Process the next layer of tool calls if more are requested and the maximum recursion depth has not been reached.
-                await this.#runPlugin(conversationHistory, processingResult.output, userId, safetyId, toolList, computedRecursionCount + 1);
+                await this.#invokePlugin(conversationHistory, processingResult.output, computedCallbackCommonProps, safetyId, toolList, computedRecursionCount + 1);
             }
         }
-    }
-
-    /**
-     * Checks the user's current set of permissions (scopes) to see which plugins are allowed to be run for the current user.
-     *
-     * How the RBAC filter works:
-     * - If the plugin has an empty list: that means no permissions are required. It will be included in the list of available tools.
-     * - If the plugin has a list of required permissions, and the user has some of those permissions, then the plugin will not be in the list of allowed plugins.
-     * - If the plugin has a list of required permissions, and the user has all of the permissions, then the plugin will be in the list of allowed plugins.
-     * @param userPermissionList List of permissions that the current user has. This will be used to filter the list of plugins that are allowed to be run for the current user.
-     * @returns List of plugins that are allowed to be run for the user's current permission list.
-     */
-    #calculatePluginList(userPermissionList: string[]): Tool[] {
-        // #region Input Validation
-        assertGuardEquals(userPermissionList);
-        // #endregion Input Validation
-
-        /** List of plugins that are allowed for the current permission list. */
-        const pluginList: Tool[] = [];
-
-        // Iterate through each plugin and check if the permissions are met for the current user.
-        for (const pluginId in this.#plugins) {
-            // Skip the current item if it is not a direct property of the plugins object (i.e., if it is inherited from the prototype chain).
-            // eslint-disable-next-line no-continue
-            if (!Object.hasOwn(this.#plugins, pluginId)) { continue; }
-
-            /** Plugin to evaluate permissions on. */
-            const currentPlugin = this.#plugins[pluginId];
-
-            // Ensure that the plugin is actually present before operating on it.
-            if (currentPlugin) {
-                // If no permissions are defined, add the plugin to the list of allowed plugins.
-                if (currentPlugin.requiredPermissionList.length === 0) {
-                    // Add the current plugin to the list of allowed plugins since no permissions are required.
-                    pluginList.push(currentPlugin.configuration);
-                } else if (currentPlugin.requiredPermissionList.every((permission) => userPermissionList.includes(permission))) {
-                    // If the user has all of the required permissions for the current plugin, add it to the list of allowed plugins.
-                    pluginList.push(currentPlugin.configuration);
-                }
-            }
-        }
-
-        // Return the computed plugin list to the caller
-        return pluginList;
     }
     // #endregion Helper Functions
 }

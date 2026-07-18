@@ -1,4 +1,6 @@
+import type { ChatEngine } from '../core/ChatEngine.js';
 import type { ChatEnginePlugin } from '../core/Plugin.js';
+import type { EmbeddingResult } from './ChatEngine.js';
 import type { Tool } from 'openai/resources/responses/responses';
 import type { tags } from 'typia';
 
@@ -16,8 +18,16 @@ export interface PluginGroup {
 
 /** Parameters that are common to all plugins. */
 export interface CommonCallbackProps {
+    /** Instance of the chat engine to be used for LLM and embedding operations as needed in the plugin. */
+    'chatEngine': ChatEngine;
+    /** List of permissions (scopes/AuthZ) assigned to the authenticated user. */
+    'permissionList': string[];
+    /** Unique identifier for the tenant or organization to which the authenticated user belongs. */
+    'tenantId': string;
     /** Unique identifier for the authenticated user using the plugin. */
     'userId': string;
+    /** In-memory vector database for storing embeddings, a reference to the copy in the Chat Engine. Used for queries. */
+    'vectorDb': EmbeddingResult[];
 }
 
 /** Configuration options used for instantiating the Chat Engine Plugin. */
