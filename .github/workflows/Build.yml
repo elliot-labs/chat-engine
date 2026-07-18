@@ -77,6 +77,8 @@ jobs:
 
             # Upload the package to GitHub packages so that it can be used by other projects and workflows
             - name: Upload - GitHub Packages
+              env:
+                  NODE_AUTH_TOKEN: ${{ github.token }}
               run: npm publish
 
             # Generate a standalone NPM package for the project that can be used in other workflows or downloaded for testing purposes
