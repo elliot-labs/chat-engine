@@ -4,6 +4,8 @@
         /* Language and output. */
         "target": "es2024",
         "incremental": true,
+        "declaration": true,
+        "rootDir": ".",
         "outDir": "bin/",
         /* Import & Export. */
         "module": "node20",
