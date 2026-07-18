@@ -1,0 +1,94 @@
+# Human friendly display name for this workflow
+name: Build - Production
+
+# Event listeners for when the job should start execution
+on:
+    # Allows you to run this workflow manually from the Actions tab
+    workflow_dispatch:
+
+    # Run the build checks on every change
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+    # Allow this workflow to be called from another workflow
+    workflow_call:
+        inputs:
+            correlationId:
+                description: "Allows jobs to identify the origin of the execution stack if doing cross-workflow calls."
+                type: string
+                required: false
+        outputs:
+            packageName:
+                description: "File name for the generated standalone NPM package."
+                value: ${{ jobs.build.outputs.packageName }}
+
+# Isolated execution environments to run steps in
+jobs:
+    # Build the production artifacts for this project
+    build:
+        # Human friendly display name for this job
+        name: Build - Production
+
+        # Operating system to run the job on
+        runs-on: ubuntu-latest
+
+        # Least permissions required for the job to run successfully
+        permissions:
+            attestations: write
+            contents: read
+            id-token: write
+            packages: write
+
+        # Content that can be reused across multiple workflows to avoid duplication of code and logic
+        outputs:
+            packageName: ${{ steps.generate-package.outputs.package-file }}
+
+        # Sequence of actions to take to accomplish the job
+        steps:
+            # Clone the repository to the runner so that it can be used in subsequent steps
+            - name: Checkout repository
+              uses: actions/checkout@v7
+              background: true
+
+            # Set up the Node.JS runtime for the project to be able to build the artifacts
+            - name: Set up Node.JS
+              uses: actions/setup-node@v7
+              background: true
+              with:
+                  node-version: 24
+                  scope: elliot-labs
+                  registry-url: https://npm.pkg.github.com/
+
+            # Install the socket firewall binary to reduce the risk of install-time malware
+            - uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f
+              with:
+                  mode: firewall-free
+
+            # Install the project dependencies needed to build the project
+            - name: Install dependencies
+              run: sfw npm ci
+
+            # Upload the package to GitHub packages so that it can be used by other projects and workflows
+            - name: Upload - GitHub Packages
+              run: npm publish
+
+            # Generate a standalone NPM package for the project that can be used in other workflows or downloaded for testing purposes
+            - name: Generate NPM Package
+              id: generate-package
+              run: echo "package-file=$(npm pack --ignore-scripts)" >> "$GITHUB_OUTPUT"
+
+            # Upload an attestation for the generated standard NPM package to provide a verifiable record of the build process and its integrity
+            - name: Attest NPM Package
+              uses: actions/attest@v4
+              with:
+                  subject-path: ${{ steps.generate-package.outputs.package-file }}
+
+            # Upload the generated NPM package as a build artifact so that it can be downloaded and used in other workflows or for testing purposes
+            - name: Upload a Build Artifact
+              uses: actions/upload-artifact@v7
+              with:
+                  name: NPM-Package
+                  if-no-files-found: error
+                  path: ${{ steps.generate-package.outputs.package-file }}
