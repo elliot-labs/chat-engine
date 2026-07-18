@@ -63,8 +63,13 @@ jobs:
 
             # Install the socket firewall binary to reduce the risk of install-time malware
             - uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f
+              background: true
               with:
                   mode: firewall-free
+
+            # Convert execution back to sync execution
+            - name: Steps - Convert Back To Synchronous Execution - Environment Setup
+              wait-all: true
 
             # Install the project dependencies needed to build the project
             - name: Install dependencies
@@ -82,13 +87,19 @@ jobs:
             # Upload an attestation for the generated standard NPM package to provide a verifiable record of the build process and its integrity
             - name: Attest NPM Package
               uses: actions/attest@v4
+              background: true
               with:
                   subject-path: ${{ steps.generate-package.outputs.package-file }}
 
             # Upload the generated NPM package as a build artifact so that it can be downloaded and used in other workflows or for testing purposes
             - name: Upload a Build Artifact
               uses: actions/upload-artifact@v7
+              background: true
               with:
                   name: NPM-Package
                   if-no-files-found: error
                   path: ${{ steps.generate-package.outputs.package-file }}
+
+            # Convert execution back to sync execution
+            - name: Steps - Convert Back To Synchronous Execution - Artifact Upload
+              wait-all: true
