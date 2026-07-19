@@ -1,6 +1,6 @@
 {
     "name": "@elliot-labs/chat-engine",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "main": "bin/src/index.js",
     "type": "module",
     "description": "Extendable engine used to interact with LLMs.",
