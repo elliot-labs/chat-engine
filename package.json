@@ -1,6 +1,6 @@
 {
     "name": "@elliot-labs/chat-engine",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "description": "Extendable engine used to interact with LLMs.",
     "keywords": [
         "AI",
