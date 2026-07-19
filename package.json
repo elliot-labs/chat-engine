@@ -1,6 +1,8 @@
 {
     "name": "@elliot-labs/chat-engine",
     "version": "1.0.0",
+    "main": "bin/src/index.js",
+    "type": "module",
     "description": "Extendable engine used to interact with LLMs.",
     "keywords": [
         "AI",
@@ -36,8 +38,6 @@
         }
     },
     "author": "Elliot Huffman (elliot@huffman.me)",
-    "type": "module",
-    "main": "bin/src/index.js",
     "scripts": {
         "build:Dev": "tsc",
         "prebuild:Prod": "tsc -p prod.tsconfig.json --emitDeclarationOnly false",
