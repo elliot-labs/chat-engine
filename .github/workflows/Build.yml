@@ -99,7 +99,7 @@ jobs:
             - name: Upload - GitHub Packages
               env:
                   NODE_AUTH_TOKEN: ${{ github.token }}
-              run: npm publish
+              run: npm publish --tag ${{ needs.Initialize-Metadata.outputs.channel }}
 
             # Generate a standalone NPM package for the project that can be used in other workflows or downloaded for testing purposes
             - name: Generate NPM Package
