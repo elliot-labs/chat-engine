@@ -52,10 +52,9 @@ jobs:
 
         # Least permissions required for the job to run successfully
         permissions:
-            attestations: write
-            contents: read
+            attestations: read
+            contents: none
             id-token: write
-            packages: write
 
         # Sequence of actions to take to accomplish the job
         steps:
