@@ -26,6 +26,18 @@ on:
 
 # Isolated execution environments to run steps in
 jobs:
+    # Collect and compute workflow specific information and metadata that will be used by downstream jobs.
+    Initialize-Metadata:
+        # Human friendly display name for this job
+        name: Initialize - Metadata
+
+        # Least permissions required for the job to run successfully
+        permissions:
+            contents: read
+
+        # Run the specified workflow
+        uses: ./.github/workflows/Metadata.yml
+
     # Build the production artifacts for this project
     build:
         # Human friendly display name for this job
@@ -40,6 +52,9 @@ jobs:
             contents: read
             id-token: write
             packages: write
+
+        # Wait for the specified jobs to complete before starting this job
+        needs: [Initialize-Metadata]
 
         # Content that can be reused across multiple workflows to avoid duplication of code and logic
         outputs:
@@ -74,6 +89,11 @@ jobs:
             # Install the project dependencies needed to build the project
             - name: Install dependencies
               run: sfw npm ci
+
+            # Update the version of the project to include the channel and short SHA for non-stable releases to provide a unique identifier for the build artifacts so multiple versions can be published for a single nonstable version
+            - name: Tattoo Version
+              if: ${{ needs.Initialize-Metadata.outputs.channel != 'stable' }}
+              run: npm version --no-commit-hooks --no-git-tag-version "${{ needs.Initialize-Metadata.outputs.version }}-${{ needs.Initialize-Metadata.outputs.channel }}.${{ needs.Initialize-Metadata.outputs.shortSha }}"
 
             # Upload the package to GitHub packages so that it can be used by other projects and workflows
             - name: Upload - GitHub Packages
