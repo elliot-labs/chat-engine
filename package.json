@@ -6,7 +6,13 @@
         "AI",
         "LLM",
         "chat",
-        "automation"
+        "Automation",
+        "OpenAI-Compatible",
+        "RAG",
+        "Plugin-Architecture",
+        "RBAC",
+        "TypeScript",
+        "Embeddings"
     ],
     "homepage": "https://github.com/elliot-labs/chat-engine#readme",
     "bugs": {
