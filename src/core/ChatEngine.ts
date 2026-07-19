@@ -97,7 +97,7 @@ export class ChatEngine {
      * @param plugin Plugin that is to be registered with the Chat Engine.
      * @throws {TypeError} If the provided plugin is not an instance of ChatEnginePlugin or if a plugin with the same ID is already registered.
      */
-    public registerPlugin(plugin: ChatEnginePlugin<unknown>): void {
+    public registerPlugin<T>(plugin: ChatEnginePlugin<T>): void {
         // #region Input Validation
         if (!(plugin instanceof ChatEnginePlugin)) { throw new TypeError('The provided plugin is not a Chat Engine Plugin!', { 'cause': 'Input Validation!' }); }
 
@@ -105,7 +105,7 @@ export class ChatEngine {
         // #endregion Input Validation
 
         // Add the plugin to the list of registered plugins
-        this.#plugins[plugin.id] = plugin;
+        this.#plugins[plugin.id] = plugin as ChatEnginePlugin<unknown>;
     }
 
     /**
