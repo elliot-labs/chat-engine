@@ -1,6 +1,7 @@
 import type { CommonCallbackProps, PluginGroup } from '../../types/Plugin.js';
 import { ChatEnginePlugin } from '../Plugin.js';
 import { assertGuardEquals } from 'typia';
+import { isCommonCallbackProps } from '../helpers/commonPropsGuard.js';
 
 /** Category for retrieval augmented generation (RAG) plugins. */
 const ragGroup: PluginGroup = {
@@ -29,7 +30,7 @@ interface CosineSearchUniqueProps {
  */
 async function invokeCosineSimilaritySearch(common: CommonCallbackProps, unique: CosineSearchUniqueProps): Promise<string> {
     // #region Input Validation
-    assertGuardEquals(common);
+    if (!isCommonCallbackProps(common)) { throw new TypeError('Provided common properties do not match the expected CommonCallbackProps type.', { 'cause': 'Input Validation!' }); }
 
     assertGuardEquals(unique);
 

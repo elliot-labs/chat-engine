@@ -343,7 +343,7 @@ export class ChatEngine {
                 // Check if the plugin is registered with the chat engine and if so, run the plugin's callback function with the provided arguments.
                 if (message.name in this.#plugins) {
                     /** String results of the plugin execution. If rich content is needed, serialized JSON will be returned. */
-                    const executionResults = await this.#plugins[message.name]!.callback(computedCallbackCommonProps, message.arguments);
+                    const executionResults = await this.#plugins[message.name]!.callback(computedCallbackCommonProps, JSON.parse(message.arguments));
 
                     /** Plugin execution results in the conversation history format. */
                     const toolCallResponse: ResponseInputItem.FunctionCallOutput = {
