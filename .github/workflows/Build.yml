@@ -96,6 +96,10 @@ jobs:
               if: ${{ needs.Initialize-Metadata.outputs.channel != 'stable' }}
               run: npm version --no-commit-hooks --no-git-tag-version "${{ needs.Initialize-Metadata.outputs.version }}-${{ needs.Initialize-Metadata.outputs.channel }}.${{ needs.Initialize-Metadata.outputs.shortSha }}"
 
+            # Transpile the project from TS to JS so that the content is executable
+            - name: Build Project
+              run: npm run build:Prod
+
             # Upload the package to GitHub packages so that it can be used by other projects and workflows
             - name: Upload - GitHub Packages
               env:
