@@ -113,7 +113,7 @@ async function invokeCosineSimilaritySearch(common: CommonCallbackProps, unique:
 }
 
 /** Chat plugin that allows the LLM to perform RAG cosine similarity searches. */
-export const searchRagCosineSimilarity = new ChatEnginePlugin<CosineSearchUniqueProps>({
+export const pluginSearchRagCosineSimilarity = new ChatEnginePlugin<CosineSearchUniqueProps>({
     'callback': invokeCosineSimilaritySearch,
     'configuration': {
         'description': 'Perform RAG search using the cosine similarity algorithm for natural language content.',

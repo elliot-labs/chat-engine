@@ -24,7 +24,7 @@ async function getTimestamp(_common: CommonCallbackProps, _unique: unknown): Pro
 }
 
 /** Chat plugin that allows the LLM see the current date and time. */
-export const getDateTime = new ChatEnginePlugin({
+export const pluginGetDateTime = new ChatEnginePlugin({
     'callback': getTimestamp,
     'configuration': {
         'description': 'Get the current date and time.',
