@@ -50,6 +50,9 @@ jobs:
             # Download the source code
             - name: Checkout Files from Repo
               uses: actions/checkout@v7
+              with:
+                  sparse-checkout: package.json
+                  sparse-checkout-cone-mode: false
 
             # Extract the project version from the package.json
             - name: Extract Project Version
