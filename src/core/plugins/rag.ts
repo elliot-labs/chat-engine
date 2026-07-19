@@ -131,5 +131,5 @@ export const pluginSearchRagCosineSimilarity = new ChatEnginePlugin<CosineSearch
         'type': 'function'
     },
     'group': ragGroup,
-    'id': '8662e698-c3a9-449e-80fc-ba31a2960416'
+    'id': 'b2101f5f-fee3-4051-8629-1efb420ff8d4'
 });
