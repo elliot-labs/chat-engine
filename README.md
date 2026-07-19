@@ -2,7 +2,7 @@
 
 [![NPM Version](https://img.shields.io/npm/v/%40elliot-labs%2Fchat-engine)](https://www.npmjs.com/package/@elliot-labs/chat-engine)
 [![GitHub License](https://img.shields.io/github/license/elliot-labs/chat-engine)](https://github.com/elliot-labs/chat-engine/blob/main/LICENSE)
-[![Static Badge](https://img.shields.io/badge/Supply_Chain_Security-Socket.dev-purple)](https://socket.dev)
+[![Socket Badge](https://badge.socket.dev/npm/package/@elliot-labs/chat-engine/latest)](https://badge.socket.dev/npm/package/@elliot-labs/chat-engine/latest)
 
 An extendable LLM Harness designed for OpenAI-compatible LLM hosts. This engine allows you to extend the core capabilities of a chat model through a robust, type-safe plugin architecture, supporting advanced features like Retrieval Augmented Generation (RAG) and Role-Based Access Control (RBAC).
 
