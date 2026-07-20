@@ -10,6 +10,9 @@ export { ChatEnginePlugin } from './core/Plugin.js';
 
 // #region Plugins
 
+// Export the Microsoft plugins that allow the LLM to find a tenant ID.
+export { pluginFindTenantId } from './core/plugins/microsoftCloud.js';
+
 // Export a plugin that can perform RAG searches using the cosine similarity algorithm.
 export { pluginSearchRagCosineSimilarity } from './core/plugins/rag.js';
 
