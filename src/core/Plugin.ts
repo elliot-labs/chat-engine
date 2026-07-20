@@ -36,6 +36,9 @@ export class ChatEnginePlugin<T> {
         // Set the configuration context to be provided to the LLM and SDK for param parsing and tool selection.
         this.configuration = props.configuration;
 
+        // Ensure that the ID is set for the tool call name to ensure uniformity
+        if ('name' in this.configuration) { this.configuration.name = props.id; }
+
         // Set the group used for grouping plugins under a specific collection for LLM context.
         this.group = props.group;
 
