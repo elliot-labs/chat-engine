@@ -3,6 +3,7 @@ import type { ResponseInputItem, ResponseOutputItem, Tool } from 'openai/resourc
 import { assertGuardEquals, type tags } from 'typia';
 import { ChatEnginePlugin } from './Plugin.js';
 import type { CommonCallbackProps } from '../types/Plugin.js';
+import type { EmbeddingCreateParams } from 'openai/resources';
 import { OpenAI } from 'openai';
 import { createHash } from 'node:crypto';
 import { getBearerTokenProvider } from '@azure/identity';
@@ -193,22 +194,31 @@ export class ChatEngine {
      * This method will throw an error if the embeddings client is not initialized, which occurs when the embeddings configuration is not provided during ChatEngine initialization.
      * @throws {TypeError} If the embeddings client is not initialized.
      * @param content The content for which embeddings are to be generated.
+     * @param dimensionCount Number of dimensions for the embeddings. If not provided, the default dimension count for the model will be used. THIS IS ONLY supported on models that support it. If not supported, this config will be ignored by the model and the model's default will be used.
      * @returns A promise that resolves to an array of embeddings.
      */
-    public async newContentVectorList(content: string): Promise<EmbeddingResult> {
+    public async newContentVectorList(content: string, dimensionCount?: number): Promise<EmbeddingResult> {
         // #region Input Validation
         assertGuardEquals(content);
+
+        assertGuardEquals(dimensionCount);
 
         // Ensure that the embeddings client is initialized before attempting to generate embeddings.
         if (!this.#embeddingsClient || !this.#embeddingsConfig) { throw new TypeError('Embeddings client is not initialized. Please provide embeddings configuration during ChatEngine initialization.', { 'cause': 'Embeddings Client Not Initialized!' }); }
         // #endregion Input Validation
 
-        /** List of vectors for the provided content. */
-        const vectorList = await this.#embeddingsClient.embeddings.create({
+        /** Embedding request for the provided content. */
+        const embeddingRequest: EmbeddingCreateParams = {
             'encoding_format': 'float',
             'input': content,
             'model': this.#embeddingsConfig.model
-        });
+        };
+
+        // If a dimension count is provided, add it to the embedding request.
+        if (dimensionCount) { embeddingRequest.dimensions = dimensionCount; }
+
+        /** List of vectors for the provided content. */
+        const vectorList = await this.#embeddingsClient.embeddings.create(embeddingRequest);
 
         // Ensure the embeddings were generated successfully. If not, throw an error.
         if (vectorList.data.length === 0) { throw new TypeError('No embeddings were generated for the provided content!', { 'cause': 'Operation Failed!' }); }
